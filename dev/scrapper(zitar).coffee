@@ -1,48 +1,83 @@
-request = require('request') # для запросов по url
-cheerio = require('cheerio')# для парсинка html
-fs = require('fs')# для работы с файловой системой
-path = require('path')# для работы с путями, в том числе и с url
-sqlite = require('sqlite3')
-db = new sqlite.Database('./zitar.db')
+# для запросов по url
+request = require('request')
 
+# для парсинка html
+cheerio = require('cheerio')
 
-db.run "CREATE TABLE IF NOT EXISTS tovar 
-	(
-		id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-		title TEXT,
-		src TEXT,
-		category TEXT
-	)"
+# для работы с файловой системой
+fs = require('fs')
 
+# для работы с путями, в том числе и с url
+path = require('path')
 
 # для работы с кодировками, особенно для перекодирования всякого дерьма 
 #типа windows-1251 в нормальную пацанскую кодировку utf-8, ёпта
 encoding = require('encoding')
-_ = require('underscore')# швейцарский нож для js
+
+# швейцарский нож для js
+_ = require('underscore')
+
+# модуль для работы с БД Sqlite3
+sqlite = require('sqlite3')
+
+
+###
+необходимые константы
+###
+
+# кодировки
+encodeFrom = 'windows-1251'
+encodeTo = 'utf-8'
 
 # собственно сам донор
-url_root = 'http://www.zitar.ru'
+url_root = 'http://www.zitar.ru/'
+
 # массив с необходимымми категориями
 LIST_CATS = [
 	"Гвозди",
 	"Дюбель", 
 	"Болты"
 ]
+
+###
+Работа с БД
+###
+
+# загружаем файл бд
+db = new sqlite.Database('./zitar.db')
+
+# создаём таблицу в бд
+db.run "CREATE TABLE IF NOT EXISTS tovar 
+	(
+		id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+		title TEXT,
+		gost TEXT,
+		src TEXT,
+		description TEXT,
+		category TEXT
+	)"
+
+
 # рутовая папка для фоток
 path_root = './img2'
+if !fs.existsSync path_root
+	fs.mkdirSync path_root
 
+###
+мои вспомогаетльные функции
+###
 
 # фнукция загрузки страницы по данному url и далбнейшее постойка дерева в переменную $
 curl = (url, cb) ->
 	request url: url, encoding: null, (err, response, data) ->
 		# если есть ошибка при запросе стр, то кидаем err в cb
 		return cb err if err
-		data = encoding.convert data, encodeTO, encodeFrom
+		data = encoding.convert data, encodeTo, encodeFrom
 		$ = cheerio.load data
 		cb null, $
 
 
-# функция скчивания картинки
+# функция скачивания картинки
 copyImg = (url, fileName, callback) ->
 	# если картнки нет то запрашиваем её request'ом и передаём через pipe
 	# в writable stream
@@ -53,12 +88,16 @@ copyImg = (url, fileName, callback) ->
 	else
 		# если фотка есть уже то просто выводим сообщение об этом в консоль
 		console.log fileName + ' already exists'
+
+
+
+###
+собсно сам процесс парсинга
+###
+
 # parsing main page
-request url: url_root, encoding: null, (err, response, data) ->
-	if !fs.existsSync path_root
-		fs.mkdirSync path_root
-	data = encoding.convert data, 'utf-8', 'windows-1251'
-	$ = cheerio.load data
+curl url_root, (err, $)->
+	return console.log err if err
 	# перебираем все ссылки категорий
 	$('.mt_rr a').filter (i, el) ->
 		titleCat = $(@).text()
@@ -69,32 +108,32 @@ request url: url_root, encoding: null, (err, response, data) ->
 			#создаём папку для каждой категории
 			if !fs.existsSync path_cat
 				fs.mkdirSync path_cat
-				# запрашиваем страницу с категорией
-			request url: linkCat, encoding: null, (err, response, data) ->
-				data = encoding.convert data, 'utf-8', 'windows-1251'
-				$ = cheerio.load data
+			# запрашиваем страницу с категорией
+			curl linkCat, (err, $)->
+				return console.log err if err
 				# находим все ссылки на товары
 				$('.pti a').filter (i,el) ->
-					linkItem = "http://zitar.ru/" + $(this).attr('href');
-					# запрашиваем страницу с товаром
-					request url: linkItem, encoding: null, (err, response, data) ->
-						data = encoding.convert data, 'utf-8', 'windows-1251'
-						$ = cheerio.load data
-						# находим картинку на странице с товаром
-						$('img.tovar').filter (i, el) ->
-							# получаем название картинки-товара
-							titleImg = ($(@).attr('title')).trim()
-							# получаем ссылку на картинку
-							srcImg = url_root + $(@).attr('src')
-							# определяем расширение картинки по его url
-							ext = path.extname srcImg
-							# компонуем путь для локальной(сохранённой) картинки
-							fileName = path_cat + '/' + titleImg + ext
-							#предварительно приводим fileName к относительному
-							srcImgLocal = '/' + titleCat + '/' + titleImg + ext
-							# вызываем ф-ию скачивания картинки
-							copyImg srcImg, fileName, ->
-								console.log titleImg + " download success"
-								# после успешного скачивания фотки
-								# добавляем в бд title, src, category, 
-								db.run "INSERT INTO tovar(title, src, category) VALUES (?,?, ?)", titleImg, srcImgLocal, titleCat
+					# пляшем от найденной ссылки на страницу конкретного товара
+					link = $(@)
+					#  находим название товара
+					titleItem = link.parent().parent().next().find('a').text()
+					# находим ГОСТ товара
+					gostItem = link.parent().parent().next().next().find('a').text()
+					# находим описание товара
+					descriptionItem = link.parent().parent().next().next().next().text()
+					# находи ссылку на кртинку товара(маленькая)
+					srcImgSmall = link.find('img').attr('src')
+					# делаем ссылку на большую картинку
+					srcImgBig = url_root + srcImgSmall.replace(/\b\./, 'b\.')
+					# определяем расширение картинки по его url
+					ext = path.extname srcImgBig
+					#предварительно приводим srcImage к относительному
+					srcImgLocal = '/' + titleCat + '/' + titleItem + ext
+					# строим путь для сохранения картинки
+					pathImgLocal = path_root + srcImgLocal
+					copyImg srcImgBig, pathImgLocal, ->
+						console.log titleItem + " download success"
+						# после успешного скачивания фотки
+						# добавляем в бд title, src, category, 
+						db.run "INSERT INTO tovar(title, gost, src, description, category) 
+						VALUES (?,?,?,?,?)", titleItem, gostItem, srcImgLocal, descriptionItem, titleCat
