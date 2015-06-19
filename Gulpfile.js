@@ -8,8 +8,8 @@ var gulp = require('gulp'),
 gulp.task('coffee', function(){
 	gulp.src("./dev/**/*.coffee")
 	.pipe(coffee({bare: true}).on('error', gutil.log))
-	.pipe(jsmin())
-	.pipe(rename({suffix: '.min'}))
+	//.pipe(jsmin())
+	//.pipe(rename({suffix: '.min'}))
 	.pipe(gulp.dest("./prod"))
 });
 

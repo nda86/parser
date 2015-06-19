@@ -2,8 +2,21 @@ request = require('request') # для запросов по url
 cheerio = require('cheerio')# для парсинка html
 fs = require('fs')# для работы с файловой системой
 path = require('path')# для работы с путями, в том числе и с url
+sqlite = require('sqlite3')
+db = new sqlite.Database('./zitar.db')
 
-# для работы с кодировками, особенно для перекодирования всякого дерьма типа windows-1251 в нормальную пацанскую кодировку utf-8, ёпта
+
+db.run "CREATE TABLE IF NOT EXISTS tovar 
+	(
+		id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+		title TEXT,
+		src TEXT,
+		category TEXT
+	)"
+
+
+# для работы с кодировками, особенно для перекодирования всякого дерьма 
+#типа windows-1251 в нормальную пацанскую кодировку utf-8, ёпта
 encoding = require('encoding')
 _ = require('underscore')# швейцарский нож для js
 
@@ -17,9 +30,22 @@ LIST_CATS = [
 ]
 # рутовая папка для фоток
 path_root = './img2'
+
+
+# фнукция загрузки страницы по данному url и далбнейшее постойка дерева в переменную $
+curl = (url, cb) ->
+	request url: url, encoding: null, (err, response, data) ->
+		# если есть ошибка при запросе стр, то кидаем err в cb
+		return cb err if err
+		data = encoding.convert data, encodeTO, encodeFrom
+		$ = cheerio.load data
+		cb null, $
+
+
 # функция скчивания картинки
 copyImg = (url, fileName, callback) ->
-	# если картнки нет то запрашиваем её request'ом и передаём через pipe в writable stream
+	# если картнки нет то запрашиваем её request'ом и передаём через pipe
+	# в writable stream
 	if !fs.existsSync(fileName)
 		r = request(url).pipe(fs.createWriteStream(fileName))
 		# по окончании скачивания вызываем callback
@@ -64,7 +90,11 @@ request url: url_root, encoding: null, (err, response, data) ->
 							ext = path.extname srcImg
 							# компонуем путь для локальной(сохранённой) картинки
 							fileName = path_cat + '/' + titleImg + ext
+							#предварительно приводим fileName к относительному
+							srcImgLocal = '/' + titleCat + '/' + titleImg + ext
 							# вызываем ф-ию скачивания картинки
 							copyImg srcImg, fileName, ->
 								console.log titleImg + " download success"
-
+								# после успешного скачивания фотки
+								# добавляем в бд title, src, category, 
+								db.run "INSERT INTO tovar(title, src, category) VALUES (?,?, ?)", titleImg, srcImgLocal, titleCat
